@@ -19,7 +19,7 @@ all: clean build
 
 build:
 	@echo "build ..."
-	$(CC) -o $(EXECUTABLE) $(SRCS)
+	$(CC) -o $(EXECUTABLE) $(CPPFLAGS) $(SRCS)
 
 clean:
 	@echo "clean ..."
