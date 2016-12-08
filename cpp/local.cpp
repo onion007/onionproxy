@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -15,6 +16,50 @@
 
 using namespace std;
 
+#define RSERVERIP     "127.0.0.1"
+#define RSERVERPORT   8388
+class ssServer
+{
+	public:
+		ssServer(const char *, const int);
+		ssize_t write(char *, const int);
+		ssize_t read(char *, const int);
+	protected:
+		char host[64];
+		int port;
+		struct sockaddr_in server;
+		int sockfd;
+};
+
+ssServer::ssServer(const char * h, const int p)
+{
+	strcpy(host, h);
+	port = p;
+	server.sin_family = AF_INET;
+	server.sin_port   = htons(port);
+	server.sin_addr.s_addr   = inet_addr(host);
+
+	if((sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) <= 0 )
+	{
+		throw runtime_error("ssServer() socket error");
+	}
+
+	if(0 != connect(sockfd, (struct sockaddr *)&server, sizeof(server)))
+	{
+		throw runtime_error("ssServer() connect error");
+	}
+}
+
+ssize_t ssServer::write(char * buffer, const int size)
+{
+	return send(sockfd, buffer, size, 0);
+}
+
+ssize_t ssServer::read(char * buffer, const int size)
+{
+	return recv(sockfd, buffer, size, 0);
+}
+
 class Connect
 {
 	public:
@@ -25,28 +70,55 @@ class Connect
 		~Connect()
 		{
 			close(sockfd);
+			if(rServer)
+			{
+				delete rServer;
+			}
 		}
-		int  handshake();
-		int  getrequest();
-		int  read(char *, int);
-		int  write(const char *, const int);
-		void setreadtimeout(int);
+		int     handshake();
+		int     getrequest();
+		ssize_t read(char *, size_t);
+		ssize_t write(const char *, const int);
+		void    setreadtimeout(int);
+		void    displayclientinfo();
+		ssServer *rServer = NULL;
+		char               buffer[BUFFERSIZE];
 	private:
-		int  sockfd;
-		char buffer[BUFFERSIZE];
+		int                sockfd;
 };
+
+void Connect::displayclientinfo()
+{
+	struct sockaddr addr;
+	socklen_t    addr_size = sizeof(addr);
+	getpeername(sockfd, &addr, &addr_size);
+	cout << "remote: " << inet_ntoa(((struct sockaddr_in *)&addr)->sin_addr);
+	cout << ":" << ((struct sockaddr_in *)&addr)->sin_port << endl;
+
+	return;
+}
 
 void Connect::setreadtimeout(int timeout)
 {
 	setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
 }
 
-int Connect::read(char * buffer, int size)
+ssize_t Connect::read(char * buffer, size_t size)
 {
-	return recv(sockfd, buffer, size, 0);
+	ssize_t n;
+	while((n = recv(sockfd, buffer, size, 0)) > 0)
+	{
+		// I don't why it can recv 1 byte, it's unuseful. Maybe it's ACK
+		if(n > 1)
+		{
+			break;
+		}
+		cout << "read n=" << n << endl;
+	}
+	return n;
 }
 
-int Connect::write(const char * buffer, const int size)
+ssize_t Connect::write(const char * buffer, const int size)
 {
 	return send(sockfd, buffer, size, 0);
 }
@@ -81,23 +153,61 @@ int Connect::handshake()
 	return 0;
 }
 
+struct socks5request {
+	uint8_t ver;
+	uint8_t cmd;
+	uint8_t rsv;
+	uint8_t atyp;
+};
+#define IPV4    1
+#define DOMAIN  3
+#define IPV6    4
+
 int Connect::getrequest()
 {
 	char    buffer[263];
 	
-	size_t  n = read(buffer, 263);
-	cout << "getrequest read n=" << n << endl;
+	ssize_t  n;
+	n = read(buffer, 263);
+
+	struct socks5request * s5 = (struct socks5request *)&buffer;
+	if(SOCKSVER5 != s5->ver)
+		return -1;
+
+	int idType = 3;
+	int len = n - idType;
+	switch(s5->atyp)
+	{
+		case IPV4:
+			break;
+		case IPV6:
+			break;
+		case DOMAIN:
+			break;
+		default:
+			cerr << "unkown type" << endl;
+			return -1;
+	}
+	strncpy(this->buffer, &buffer[idType], len);
+	displayclientinfo();
+
+	char wbuf[] = {0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43};
+	if(10 != write(wbuf, 10))
+	{
+		cerr << "write error" << endl;
+		return -1;
+	}
  
-	return 0;
+	return len;
 }
 
-class ssServer
+class ssLocal
 {
 	public:
-		ssServer(const char *, const int);
-		~ssServer();
+		ssLocal(const char *, const int);
+		~ssLocal();
 		int Run();
-	private:
+	protected:
 		Connect * connect[QUEUE];
 		char host[64];
 		int port;
@@ -105,9 +215,8 @@ class ssServer
 		int sockfd;
 };
 
-ssServer::ssServer(const char * h, const int p)
+ssLocal::ssLocal(const char * h, const int p)
 {
-	//host = h;
 	strcpy(host, h);
 	port = p;
 	server.sin_family = AF_INET;
@@ -115,8 +224,28 @@ ssServer::ssServer(const char * h, const int p)
 	server.sin_addr.s_addr   = inet_addr(host);
 }
 
-ssServer::~ssServer()
+ssLocal::~ssLocal()
 {
+}
+
+void * handle2(void *t)
+{
+	Connect * conn = (Connect *)t;
+	for(;;)
+	{
+		char    buffer[2048];
+		ssize_t n;
+		n = conn->rServer->read(buffer, 2048);
+		if( n > 0)
+		{
+			conn->write(buffer, n);
+		}
+		else
+		{
+			break;
+		}
+	}
+	pthread_exit((void *)0);
 }
 
 void * handle(void * t)
@@ -127,20 +256,43 @@ void * handle(void * t)
 	// set timeout
 	conn->setreadtimeout(10 * 1000);
 
-	int err;
+	int err, len;
 	// socks5 handshake
 	if(0 != conn->handshake())
 	{
 		cerr << "handshake error!" << endl;
+		goto EXIT;
 	}
 
 	// getrequest
-	if(0 != conn->getrequest())
+	if((len = conn->getrequest()) <= 0)
 	{
 		cerr << "getrequest error!" << endl;
+		goto EXIT;
 	}
-	
 
+	/*
+	 * handle...
+	 * 1. connect shadowsocks server
+	 */
+	conn->rServer = new ssServer(RSERVERIP, RSERVERPORT);
+	conn->rServer->write(conn->buffer, len);
+	pthread_t tids;
+	err = pthread_create(&tids, NULL, handle2, (void *)conn);
+	for(;;)
+	{
+		char    buffer[2048];
+		ssize_t n;
+		n = conn->read(buffer, 2048);
+		if( n > 0 )
+		{
+			conn->rServer->write(buffer, n);
+		}
+		else
+		{
+			break;
+		}
+	}
 	/*
 	char buf[1024];
 	int  datalen;
@@ -151,10 +303,13 @@ void * handle(void * t)
 	cout << "close connection" << conn << endl;
 	close(conn);
 	*/
+
+EXIT:
+	delete conn;
 	pthread_exit((void *)0);
 }
 
-int ssServer::Run()
+int ssLocal::Run()
 {
 	cout << host << " " << port << endl;
 	if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
@@ -225,6 +380,6 @@ int main(int argc, char* argv[])
 	 */
 
 	// Start a service
-	ssServer server = ssServer("0.0.0.0", 1080);
-	server.Run();
+	ssLocal lserver = ssLocal("0.0.0.0", 1080);
+	lserver.Run();
 }
