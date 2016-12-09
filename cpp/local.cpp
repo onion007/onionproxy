@@ -108,7 +108,7 @@ ssize_t Connect::read(char * buffer, size_t size)
 	ssize_t n;
 	while((n = recv(sockfd, buffer, size, 0)) > 0)
 	{
-		// I don't why it can recv 1 byte, it's unuseful. Maybe it's ACK
+		// Ignore that 1-byte package, it's unuseful. it should be ACK package.
 		if(n > 1)
 		{
 			break;
