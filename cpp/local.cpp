@@ -24,11 +24,11 @@ class ssServer
 		ssServer(const char *, const int);
 		ssize_t write(char *, size_t);
 		ssize_t read(char *, size_t);
+		int sockfd;
 	protected:
 		char host[64];
 		int port;
 		struct sockaddr_in server;
-		int sockfd;
 };
 
 ssServer::ssServer(const char * h, const int p)
@@ -83,7 +83,6 @@ class Connect
 		void    displayclientinfo();
 		ssServer *rServer = NULL;
 		char               buffer[BUFFERSIZE];
-	private:
 		int                sockfd;
 };
 
@@ -249,7 +248,7 @@ ssLocal::~ssLocal()
 void * handle2(void *t)
 {
 	Connect * conn = (Connect *)t;
-	for(;;)
+	while(conn->sockfd > 0 && conn->rServer->sockfd > 0)
 	{
 		// client <- 1080 <- 8388
 		char    buffer[2048];
@@ -274,7 +273,7 @@ void * handle(void * t)
 	//cout << "handle [" << conn->sockfd << "]..." << endl;
 
 	// set timeout
-	conn->setreadtimeout(10 * 1000);
+	conn->setreadtimeout(60 * 1000);
 
 	int err, len;
 	// socks5 handshake
@@ -299,7 +298,7 @@ void * handle(void * t)
 	conn->rServer->write(conn->buffer, len);
 	pthread_t tids;
 	err = pthread_create(&tids, NULL, handle2, (void *)conn);
-	for(;;)
+	while(conn->sockfd > 0 && conn->rServer->sockfd > 0)
 	{
 		// client -> 1080 -> 8388
 		char    buffer[2048];
@@ -314,6 +313,14 @@ void * handle(void * t)
 			break;
 		}
 	}
+
+#ifdef DEBUG
+	cout << "waiting thread... " << endl;
+#endif
+	pthread_join(tids, NULL);
+#ifdef DEBUG
+	cout << "        thread done!!!!" << endl;
+#endif
 	/*
 	char buf[1024];
 	int  datalen;
