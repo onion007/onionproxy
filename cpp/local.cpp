@@ -317,7 +317,7 @@ void * handle(void * t)
 #endif
 	pthread_join(tids, NULL);
 #ifdef DEBUG
-	cout << "        thread done!!!!" << endl;
+	cout << "thread done!!!!" << endl;
 #endif
 	/*
 	char buf[1024];
