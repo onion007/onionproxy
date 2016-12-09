@@ -22,8 +22,8 @@ class ssServer
 {
 	public:
 		ssServer(const char *, const int);
-		ssize_t write(char *, const int);
-		ssize_t read(char *, const int);
+		ssize_t write(char *, size_t);
+		ssize_t read(char *, size_t);
 	protected:
 		char host[64];
 		int port;
@@ -50,12 +50,12 @@ ssServer::ssServer(const char * h, const int p)
 	}
 }
 
-ssize_t ssServer::write(char * buffer, const int size)
+ssize_t ssServer::write(char * buffer, size_t size)
 {
 	return send(sockfd, buffer, size, 0);
 }
 
-ssize_t ssServer::read(char * buffer, const int size)
+ssize_t ssServer::read(char * buffer, size_t size)
 {
 	return recv(sockfd, buffer, size, 0);
 }
@@ -188,8 +188,6 @@ int Connect::getrequest()
 			cerr << "unkown type" << endl;
 			return -1;
 	}
-	strncpy(this->buffer, &buffer[idType], len);
-	displayclientinfo();
 
 	char wbuf[] = {0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43};
 	if(10 != write(wbuf, 10))
@@ -197,6 +195,26 @@ int Connect::getrequest()
 		cerr << "write error" << endl;
 		return -1;
 	}
+#ifdef DEBUG
+	memcpy(this->buffer, &buffer[idType], len);
+	cout << "len=" << len << endl;
+	cout << "S:";
+	cout << hex;
+	for(int i=0; i<len; i++)
+	{
+		cout << (int)(buffer[idType+i]);
+		cout << " ";
+	}
+	cout << endl;
+	cout << "D:";
+	for(int i=0; i<len; i++)
+	{
+		cout << (int)(this->buffer[i]);
+		cout << " ";
+	}
+	cout << dec << endl;
+#endif
+	displayclientinfo();
  
 	return len;
 }
@@ -233,9 +251,11 @@ void * handle2(void *t)
 	Connect * conn = (Connect *)t;
 	for(;;)
 	{
+		// client <- 1080 <- 8388
 		char    buffer[2048];
 		ssize_t n;
 		n = conn->rServer->read(buffer, 2048);
+		cout << "handle2 for loop n=" << n << endl;
 		if( n > 0)
 		{
 			conn->write(buffer, n);
@@ -281,6 +301,7 @@ void * handle(void * t)
 	err = pthread_create(&tids, NULL, handle2, (void *)conn);
 	for(;;)
 	{
+		// client -> 1080 -> 8388
 		char    buffer[2048];
 		ssize_t n;
 		n = conn->read(buffer, 2048);
