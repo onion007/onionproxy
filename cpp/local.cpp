@@ -1,7 +1,11 @@
 #include <iostream>
+#include <list>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <thread>
+
+#include <assert.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -245,9 +249,8 @@ ssLocal::~ssLocal()
 {
 }
 
-void * handle2(void *t)
+void handle2(Connect * conn)
 {
-	Connect * conn = (Connect *)t;
 	while(conn->sockfd > 0 && conn->rServer->sockfd > 0)
 	{
 		// client <- 1080 <- 8388
@@ -292,10 +295,10 @@ void * handle(void * t)
 	 * handle...
 	 * 1. connect shadowsocks server
 	 */
+    {
 	conn->rServer = new ssServer(RSERVERIP, RSERVERPORT);
 	conn->rServer->write(conn->buffer, len);
-	pthread_t tids;
-	err = pthread_create(&tids, NULL, handle2, (void *)conn);
+    thread t(handle2, conn);
 	while(conn->sockfd > 0 && conn->rServer->sockfd > 0)
 	{
 		// client -> 1080 -> 8388
@@ -315,20 +318,11 @@ void * handle(void * t)
 #ifdef DEBUG
 	cout << "waiting thread... " << endl;
 #endif
-	pthread_join(tids, NULL);
+    t.join();
 #ifdef DEBUG
 	cout << "thread done!!!!" << endl;
 #endif
-	/*
-	char buf[1024];
-	int  datalen;
-	while(datalen = recv(conn->sockfd, buf, 1024, 0) > 0)
-	{
-		cout << "datalen=" << datalen << endl;
-	}
-	cout << "close connection" << conn << endl;
-	close(conn);
-	*/
+    }
 
 EXIT:
 	delete conn;
@@ -381,6 +375,123 @@ int ssLocal::Run()
 	close(sockfd);
 }
 
+struct sockaddr_in init_sockaddr_in(string h, int p)
+{
+    struct sockaddr_in saddr;
+    saddr.sin_family      = AF_INET;
+    saddr.sin_port        = htons(p);
+    saddr.sin_addr.s_addr = inet_addr(&h[0]);
+    return saddr;
+}
+
+class ShadowsocksConnect
+{
+    public:
+        ShadowsocksConnect(int fd): sockfd(fd) {};
+        ~ShadowsocksConnect()
+        {
+            if(sockfd > 0)
+            {
+                close(sockfd);
+            }
+        }
+    private:
+        int     sockfd;
+};
+
+class ShadowsocksPipe
+{
+    public:
+        ShadowsocksConnect  *request  = NULL;
+        ShadowsocksConnect  *response = NULL;
+        void operator() ();
+    private:
+        void run(void);
+        int  handshake(void);
+};
+
+int ShadowsocksPipe::handshake(void)
+{
+    return 0;
+}
+
+void ShadowsocksPipe::run(void)
+{
+    // socks5 handshake
+    if(-1 == handshake())
+    {
+        cerr << __func__ << ": handshake error!" << endl;
+    }
+ 
+    // socks5 getrequest
+    //
+    // for accept
+}
+
+void ShadowsocksPipe::operator() (void)
+{
+    run();
+}
+
+class ShadowsocksLocal
+{
+    public:
+        ShadowsocksLocal(string, int);
+        ~ShadowsocksLocal();
+        void Run(void);
+    private:
+        string  host;
+        int     port;
+        int     sockfd;
+        list<ShadowsocksPipe> pipelist;
+};
+
+#define MAXLISTENQ  32
+ShadowsocksLocal::ShadowsocksLocal(string h, int p): host(h), port(p)
+{
+    struct sockaddr_in saddr = init_sockaddr_in(host, port);
+
+    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    {
+        throw runtime_error("ShadowsocksLocal socket error");
+    }
+
+    if(bind(sockfd, (struct sockaddr *)&saddr, sizeof(saddr)) == -1)
+    {
+        throw runtime_error("ShadowsocksLocal bind error");
+    }
+
+    if(listen(sockfd, MAXLISTENQ) == -1)
+    {
+        throw runtime_error("ShadowsocksLocal listen error");
+    }
+}
+
+ShadowsocksLocal::~ShadowsocksLocal(void)
+{
+    close(sockfd);
+}
+
+void ShadowsocksLocal::Run()
+{
+    int conn = 0;
+    ShadowsocksPipe *pipe = NULL;
+    for(;;)
+    {
+		if((conn = accept(sockfd, NULL, NULL)) < 0)
+        {
+            cerr << __func__ << ": accept error" << endl;
+            break;
+        }
+
+        pipe = new ShadowsocksPipe();
+        pipe->request = new ShadowsocksConnect(conn);
+
+        thread t(*pipe);
+        t.detach();
+    }
+}
+
 int main(int argc, char* argv[])
 {
 	const char *configFile = NULL;
@@ -405,7 +516,10 @@ int main(int argc, char* argv[])
 	 * TODO: Parse config file
 	 */
 
+
 	// Start a service
-	ssLocal lserver = ssLocal("0.0.0.0", 1080);
-	lserver.Run();
+    string host = "0.0.0.0";
+    int    port = 1080;
+    ShadowsocksLocal localservice(host, port);
+	localservice.Run();
 }

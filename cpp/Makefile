@@ -6,7 +6,7 @@ SRCDIR :=
 
 CC := g++
 CFLAGS := -g -lpthread -O3
-CPPFLAGS := $(CFLAGS)
+CPPFLAGS := $(CFLAGS) -std=c++11
 
 RM := rm -f
 
