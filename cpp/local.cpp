@@ -254,7 +254,6 @@ void * handle2(void *t)
 		char    buffer[2048];
 		ssize_t n;
 		n = conn->rServer->read(buffer, 2048);
-		cout << "handle2 for loop n=" << n << endl;
 		if( n > 0)
 		{
 			conn->write(buffer, n);
@@ -270,7 +269,6 @@ void * handle2(void *t)
 void * handle(void * t)
 {
 	Connect * conn = (Connect *)t;
-	//cout << "handle [" << conn->sockfd << "]..." << endl;
 
 	// set timeout
 	conn->setreadtimeout(60 * 1000);
