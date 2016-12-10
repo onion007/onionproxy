@@ -14,17 +14,17 @@
 using namespace std;
 
 #define DEBUG
-#define QUEUE		20
-#define MAXSIZE		4096
-#define SOCKSVER5	5
-#define RSERVERIP	"127.0.0.1"
-#define RSERVERPORT	8388
+#define QUEUE       20
+#define MAXSIZE     4096
+#define SOCKSVER5   5
+#define RSERVERIP   "127.0.0.1"
+#define RSERVERPORT 8388
 
 struct sockaddr_in init_sockaddr_in(string h, int p)
 {
     struct sockaddr_in saddr;
     saddr.sin_family      = AF_INET;
-    saddr.sin_port        = htons(p);
+    saddr.sin_port    = htons(p);
     saddr.sin_addr.s_addr = inet_addr(&h[0]);
     return saddr;
 }
@@ -44,7 +44,6 @@ class ShadowsocksConnect
         ssize_t write(char *, size_t);
         char    buffer[4096];
         void    settimeout(int timeout);
-        int     getsockfd() { return sockfd; }
     private:
         int     sockfd;
 };
@@ -88,25 +87,25 @@ class ShadowsocksPipe
 
 int ShadowsocksPipe::handshake(void)
 {
-	const int idVer     = 0;
-	const int idNmethod = 1;
+    const int idVer     = 0;
+    const int idNmethod = 1;
     char      buffer[263];
 
-	size_t n = request->read(buffer, idNmethod + 1);
-	if(n <= 0)
-	{
+    size_t n = request->read(buffer, idNmethod + 1);
+    if(n <= 0)
+    {
         throw ": can't read data!";
-	}
-	if(SOCKSVER5 != buffer[idVer])
-	{
+    }
+    if(SOCKSVER5 != buffer[idVer])
+    {
         throw ": get not socks5 data!";
-	}
+    }
 
     char wbuf[2] = {0x05, 0x00};
-	if(2 != request->write(wbuf, 2))
-	{
+    if(2 != request->write(wbuf, 2))
+    {
         throw ": write error!";
-	}
+    }
 
     return 0;
 }
@@ -118,10 +117,10 @@ int ShadowsocksPipe::getrequest(void)
     char      buffer[263];
 
     ssize_t n = request->read(buffer, 263);
-	if(SOCKSVER5 != buffer[idVer])
-	{
+    if(SOCKSVER5 != buffer[idVer])
+    {
         throw ": get not socks5 data!";
-	}
+    }
 
     char wbuf[] = {0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43};
     request->write(wbuf, 10);
@@ -241,7 +240,7 @@ void SocketService::Run()
     ShadowsocksPipe *pipe = NULL;
     for(;;)
     {
-		if((conn = accept(sockfd, NULL, NULL)) < 0)
+        if((conn = accept(sockfd, NULL, NULL)) < 0)
         {
             cerr << __func__ << ": accept error" << endl;
             break;
@@ -258,27 +257,27 @@ void SocketService::Run()
 
 int main(int argc, char* argv[])
 {
-	const char *configFile = NULL;
+    const char *configFile = NULL;
 
-	int ch = 0;
-	while((ch=getopt(argc, argv, "c:")) != -1)
-	{
-		switch(ch)
-		{
-			case 'c':
-				configFile = optarg;
-				break;
-		}
-	}
-	
-	if(NULL == configFile)
-		configFile = "./config.json";
+    int ch = 0;
+    while((ch=getopt(argc, argv, "c:")) != -1)
+    {
+        switch(ch)
+        {
+            case 'c':
+                configFile = optarg;
+                break;
+        }
+    }
+    
+    if(NULL == configFile)
+        configFile = "./config.json";
 #ifdef DEBUG
-	cout << "config=" << configFile << endl;
+    cout << "config=" << configFile << endl;
 #endif
-	/*
-	 * TODO: Parse config file
-	 */
+    /*
+     * TODO: Parse config file
+     */
 
 
     // Start a service
