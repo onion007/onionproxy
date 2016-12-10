@@ -5,7 +5,7 @@ INCLUDES := .
 SRCDIR :=
 
 CC := g++
-CFLAGS := -g -lpthread -O3
+CFLAGS := -g -O3 -lpthread
 CPPFLAGS := $(CFLAGS) -std=c++11
 
 RM := rm -f
