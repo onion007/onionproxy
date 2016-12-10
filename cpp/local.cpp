@@ -395,9 +395,50 @@ class ShadowsocksConnect
                 close(sockfd);
             }
         }
+        ssize_t read(char *, size_t);
+        ssize_t write(char *, size_t);
+        char    buffer[4096];
+        void    settimeout(int timeout);
+        int     getsockfd() { return sockfd; }
     private:
         int     sockfd;
 };
+
+void ShadowsocksConnect::settimeout(int timeout)
+{
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout));
+}
+
+ssize_t ShadowsocksConnect::read(char * buffer, size_t len)
+{
+    /*
+    if(sockfd <= 0)
+    {
+        throw "sockfd is close";
+    }
+    */
+    size_t n;
+	while((n = recv(sockfd, buffer, len, 0)) > 0)
+	{
+		// Ignore that 1-byte package, it's unuseful. it should be ACK package.
+		if(n != 1)
+		{
+			break;
+		}
+	}
+	return n;
+}
+
+ssize_t ShadowsocksConnect::write(char * buffer, size_t len)
+{
+    /*
+    if(sockfd <= 0)
+    {
+        throw "sockfd is close";
+    }
+    */
+	return send(sockfd, buffer, len, 0);
+}
 
 class ShadowsocksPipe
 {
@@ -408,24 +449,106 @@ class ShadowsocksPipe
     private:
         void run(void);
         int  handshake(void);
+        int  getrequest(void);
+        static void forward(ShadowsocksConnect *, ShadowsocksConnect *, const char *);
 };
 
 int ShadowsocksPipe::handshake(void)
 {
+	const int idVer     = 0;
+	const int idNmethod = 1;
+    char      buffer[263];
+
+	size_t n = request->read(buffer, idNmethod + 1);
+	if(n <= 0)
+	{
+        throw ": can't read data!";
+	}
+	if(SOCKSVER5 != buffer[idVer])
+	{
+        throw ": get not socks5 data!";
+	}
+
+    char wbuf[2] = {0x05, 0x00};
+	if(2 != request->write(wbuf, 2))
+	{
+        throw ": write error!";
+	}
+
     return 0;
+}
+
+int ShadowsocksPipe::getrequest(void)
+{
+    const int idVer  = 0;
+    const int idType = 3;
+    char      buffer[263];
+
+    ssize_t n = request->read(buffer, 263);
+	if(SOCKSVER5 != buffer[idVer])
+	{
+        throw ": get not socks5 data!";
+	}
+
+    char wbuf[] = {0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43};
+    request->write(wbuf, 10);
+
+    n -= idType;
+    memcpy(request->buffer, &buffer[3], n);
+
+    return n;
+}
+
+void ShadowsocksPipe::forward(ShadowsocksConnect *src, ShadowsocksConnect *dst, const char * msg)
+{
+    for(;;)
+    {
+        int    n;
+        if((n = src->read(src->buffer, 4096)) > 0 ) 
+        {
+            dst->write(src->buffer, n);
+        }
+        cout << msg << ": forward n=" << n << " sockfd=" << src->getsockfd() << endl;
+    }
 }
 
 void ShadowsocksPipe::run(void)
 {
-    // socks5 handshake
-    if(-1 == handshake())
+    try
     {
-        cerr << __func__ << ": handshake error!" << endl;
+        request->settimeout(60 * 1000);
+        /*
+         * 1. socks5 handshake
+         * 2. get request
+         * 3. connect server, forward package
+         */
+        handshake();
+        int n = getrequest();
+
+        struct sockaddr_in saddr = init_sockaddr_in("127.0.0.1", 8388);
+        int connfd = socket(AF_INET, SOCK_STREAM, 0);
+        if(connfd == -1)
+        {
+            throw "create client socket error";
+        }
+        if(connect(connfd, (struct sockaddr *)&saddr, sizeof(saddr)) == -1)
+        {
+            throw "connect Shadowsocks server error";
+        }
+        response = new ShadowsocksConnect(connfd);
+        response->write(request->buffer, n);
+
+        /*
+        thread t(forward, response, request, "response->request");
+        forward(request, response, "request->response");
+        */
+        thread t(forward, request, response, "request->response");
+        forward(response, request, "response->request");
     }
- 
-    // socks5 getrequest
-    //
-    // for accept
+    catch (const char* msg)
+    {
+        cerr << msg << endl;
+    }
 }
 
 void ShadowsocksPipe::operator() (void)
@@ -433,48 +556,55 @@ void ShadowsocksPipe::operator() (void)
     run();
 }
 
-class ShadowsocksLocal
+class SocketBase
 {
     public:
-        ShadowsocksLocal(string, int);
-        ~ShadowsocksLocal();
-        void Run(void);
-    private:
+        SocketBase(string h, int p): host(h), port(p) {}
+    protected:
         string  host;
         int     port;
         int     sockfd;
+};
+
+class SocketService: public SocketBase
+{
+    public:
+        SocketService(string, int);
+        ~SocketService();
+        void Run(void);
+    private:
         list<ShadowsocksPipe> pipelist;
 };
 
 #define MAXLISTENQ  32
-ShadowsocksLocal::ShadowsocksLocal(string h, int p): host(h), port(p)
+SocketService::SocketService(string h, int p): SocketBase(h, p)
 {
     struct sockaddr_in saddr = init_sockaddr_in(host, port);
 
     if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
-        throw runtime_error("ShadowsocksLocal socket error");
+        throw runtime_error("SocketService socket error");
     }
 
     if(bind(sockfd, (struct sockaddr *)&saddr, sizeof(saddr)) == -1)
     {
-        throw runtime_error("ShadowsocksLocal bind error");
+        throw runtime_error("SocketService bind error");
     }
 
     if(listen(sockfd, MAXLISTENQ) == -1)
     {
-        throw runtime_error("ShadowsocksLocal listen error");
+        throw runtime_error("SocketService listen error");
     }
 }
 
-ShadowsocksLocal::~ShadowsocksLocal(void)
+SocketService::~SocketService(void)
 {
     close(sockfd);
 }
 
-void ShadowsocksLocal::Run()
+void SocketService::Run()
 {
-    int conn = 0;
+   int conn = 0;
     ShadowsocksPipe *pipe = NULL;
     for(;;)
     {
@@ -490,6 +620,7 @@ void ShadowsocksLocal::Run()
         thread t(*pipe);
         t.detach();
     }
+    cout << __func__ << ": end!" << endl;
 }
 
 int main(int argc, char* argv[])
@@ -497,11 +628,11 @@ int main(int argc, char* argv[])
 	const char *configFile = NULL;
 
 	int ch = 0;
-	while((ch=getopt(argc, argv, "f:")) != -1)
+	while((ch=getopt(argc, argv, "c:")) != -1)
 	{
 		switch(ch)
 		{
-			case 'f':
+			case 'c':
 				configFile = optarg;
 				break;
 		}
@@ -517,9 +648,9 @@ int main(int argc, char* argv[])
 	 */
 
 
-	// Start a service
+    // Start a service
     string host = "0.0.0.0";
     int    port = 1080;
-    ShadowsocksLocal localservice(host, port);
-	localservice.Run();
+    SocketService localservice(host, port);
+    localservice.Run();
 }
