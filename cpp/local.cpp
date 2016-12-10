@@ -6,7 +6,6 @@
 #include <thread>
 
 #include <assert.h>
-#include <pthread.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -55,16 +54,7 @@ void ShadowsocksConnect::settimeout(int timeout)
 
 ssize_t ShadowsocksConnect::read(char * buffer, size_t len)
 {
-    size_t n;
-    while((n = recv(sockfd, buffer, len, 0)) > 0)
-    {
-        // Ignore that 1-byte package, it's unuseful. it should be ACK package.
-        if(n != 1)
-        {
-            break;
-        }
-    }
-    return n;
+    return recv(sockfd, buffer, len, 0);
 }
 
 ssize_t ShadowsocksConnect::write(char * buffer, size_t len)
@@ -91,20 +81,20 @@ int ShadowsocksPipe::handshake(void)
     const int idNmethod = 1;
     char      buffer[263];
 
-    size_t n = request->read(buffer, idNmethod + 1);
+    size_t n = request->read(buffer, 263);
     if(n <= 0)
     {
-        throw ": can't read data!";
+        throw "handshake: can't read data!";
     }
     if(SOCKSVER5 != buffer[idVer])
     {
-        throw ": get not socks5 data!";
+        throw "handshake: get not socks5 data!";
     }
 
     char wbuf[2] = {0x05, 0x00};
     if(2 != request->write(wbuf, 2))
     {
-        throw ": write error!";
+        throw "handshake: write error!";
     }
 
     return 0;
@@ -119,7 +109,7 @@ int ShadowsocksPipe::getrequest(void)
     ssize_t n = request->read(buffer, 263);
     if(SOCKSVER5 != buffer[idVer])
     {
-        throw ": get not socks5 data!";
+        throw "getrequest: get not socks5 data!";
     }
 
     char wbuf[] = {0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x08, 0x43};
@@ -176,6 +166,7 @@ void ShadowsocksPipe::run(void)
 
         thread t(forward, response, request);
         forward(request, response);
+        t.join();
     }
     catch (const char* msg)
     {
@@ -236,7 +227,7 @@ SocketService::~SocketService(void)
 
 void SocketService::Run()
 {
-   int conn = 0;
+    int conn = 0;
     ShadowsocksPipe *pipe = NULL;
     for(;;)
     {
@@ -272,9 +263,6 @@ int main(int argc, char* argv[])
     
     if(NULL == configFile)
         configFile = "./config.json";
-#ifdef DEBUG
-    cout << "config=" << configFile << endl;
-#endif
     /*
      * TODO: Parse config file
      */
