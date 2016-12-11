@@ -36,6 +36,7 @@ class ShadowsocksConnect
         {
             if(sockfd > 0)
             {
+                cout << "close sockfd=" << sockfd << endl;
                 close(sockfd);
             }
         }
@@ -43,6 +44,7 @@ class ShadowsocksConnect
         ssize_t write(char *, size_t);
         char    buffer[MAXSIZE];
         void    settimeout(int timeout);
+        void    Shutdown() { shutdown(sockfd, SHUT_WR); }
     private:
         int     sockfd;
 };
@@ -65,6 +67,7 @@ ssize_t ShadowsocksConnect::write(char * buffer, size_t len)
 class ShadowsocksPipe
 {
     public:
+        ~ShadowsocksPipe();
         ShadowsocksConnect  *request  = NULL;
         ShadowsocksConnect  *response = NULL;
         void Run() { run(); }
@@ -74,8 +77,16 @@ class ShadowsocksPipe
         void run(void);
         int  handshake(void);
         int  getrequest(void);
-        static void forward(ShadowsocksConnect *, ShadowsocksConnect *);
+        static void forward(ShadowsocksConnect *, ShadowsocksConnect *, string);
 };
+
+ShadowsocksPipe::~ShadowsocksPipe()
+{
+    if(request)
+        delete request;
+    if(response)
+        delete response;
+}
 
 int ShadowsocksPipe::handshake(void)
 {
@@ -123,7 +134,7 @@ int ShadowsocksPipe::getrequest(void)
     return n;
 }
 
-void ShadowsocksPipe::forward(ShadowsocksConnect *src, ShadowsocksConnect *dst)
+void ShadowsocksPipe::forward(ShadowsocksConnect *src, ShadowsocksConnect *dst, string m)
 {
     int n;
     for(;;)
@@ -138,6 +149,8 @@ void ShadowsocksPipe::forward(ShadowsocksConnect *src, ShadowsocksConnect *dst)
             break;
         }
     }
+    dst->Shutdown();
+    cout << m << " exit..." << endl;
 }
 
 void ShadowsocksPipe::run(void)
@@ -166,8 +179,8 @@ void ShadowsocksPipe::run(void)
         response = new ShadowsocksConnect(connfd);
         response->write(request->buffer, n);
 
-        thread t(forward, response, request);
-        forward(request, response);
+        thread t(forward, response, request, "res -> req");
+        forward(request, response, "req -> res");
         t.join();
     }
     catch (const char* msg)
@@ -237,6 +250,7 @@ void SocketService::Run()
     list<ShadowsocksPipe *>::iterator iter;
     for(;;)
     {
+        cout << "num=" << pipelist.size() << endl;
         for(iter = pipelist.begin(); iter != pipelist.end();)
         {
             list<ShadowsocksPipe *>::iterator t = iter++;
