@@ -41,7 +41,7 @@ class ShadowsocksConnect
         }
         ssize_t read(char *, size_t);
         ssize_t write(char *, size_t);
-        char    buffer[4096];
+        char    buffer[MAXSIZE];
         void    settimeout(int timeout);
     private:
         int     sockfd;
@@ -128,7 +128,7 @@ void ShadowsocksPipe::forward(ShadowsocksConnect *src, ShadowsocksConnect *dst)
     int n;
     for(;;)
     {
-        n = src->read(src->buffer, 4096);
+        n = src->read(src->buffer, MAXSIZE);
         if(n > 0) 
         {
             dst->write(src->buffer, n);
