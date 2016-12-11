@@ -67,7 +67,9 @@ class ShadowsocksPipe
     public:
         ShadowsocksConnect  *request  = NULL;
         ShadowsocksConnect  *response = NULL;
+        void Run() { run(); }
         void operator() ();
+        int  status = 1;
     private:
         void run(void);
         int  handshake(void);
@@ -172,10 +174,13 @@ void ShadowsocksPipe::run(void)
     {
         cerr << msg << endl;
     }
+    // set status to 0, mains can be deleted
+    this->status = 0;
 }
 
 void ShadowsocksPipe::operator() (void)
 {
+    cout << "this=" << this << " run" << endl;
     run();
 }
 
@@ -196,7 +201,7 @@ class SocketService: public SocketBase
         ~SocketService();
         void Run(void);
     private:
-        list<ShadowsocksPipe> pipelist;
+        list<ShadowsocksPipe *> pipelist;
 };
 
 #define MAXLISTENQ  32
@@ -229,8 +234,20 @@ void SocketService::Run()
 {
     int conn = 0;
     ShadowsocksPipe *pipe = NULL;
+    list<ShadowsocksPipe *>::iterator iter;
     for(;;)
     {
+        for(iter = pipelist.begin(); iter != pipelist.end();)
+        {
+            list<ShadowsocksPipe *>::iterator t = iter++;
+            pipe = *t;
+            if(0 == pipe->status)
+            {
+                pipelist.erase(t);
+                delete pipe;
+            }
+        }
+
         if((conn = accept(sockfd, NULL, NULL)) < 0)
         {
             cerr << __func__ << ": accept error" << endl;
@@ -239,8 +256,9 @@ void SocketService::Run()
 
         pipe = new ShadowsocksPipe();
         pipe->request = new ShadowsocksConnect(conn);
+        pipelist.push_back(pipe);
 
-        thread t(*pipe);
+        thread t(&ShadowsocksPipe::Run, pipe);
         t.detach();
     }
     cout << __func__ << ": end!" << endl;
