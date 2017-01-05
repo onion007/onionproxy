@@ -10,7 +10,7 @@ CPPFLAGS := $(CFLAGS) -std=c++11
 
 RM := rm -f
 
-SRCS := $(wildcard *.cpp) $(wildcard $(addsuffix /*.cpp, $(SRCDIR)))
+SRCS := local.cpp
 OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 
 .PHONY : all build clean
